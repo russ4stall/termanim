@@ -25,6 +25,14 @@ def mul(a, s):
     return (a[0] * s, a[1] * s)
 
 
+def dot(a, b):
+    return a[0] * b[0] + a[1] * b[1]
+
+
+def lerp(a, b, k):
+    return (a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k)
+
+
 def length(a):
     return math.hypot(a[0], a[1])
 
@@ -83,6 +91,30 @@ class Part:
             return (min(a[0], b[0]) - r, min(a[1], b[1]) - r, max(a[0], b[0]) + r, max(a[1], b[1]) + r)
         c, rx, ry = self.args
         return (c[0] - rx, c[1] - ry, c[0] + rx, c[1] + ry)
+
+
+class Shell(Part):
+    """An ellipse turned to lie along `axis` (a unit vector), optionally cut
+    flat: `cut` is (point, normal) and only the side the normal points to is
+    kept. Turn it with a figure's head, say, and a helmet turns too."""
+
+    def __init__(self, center, along, across, axis, mat, cut=None):
+        super().__init__("ell", (center, along, across), mat)
+        self.axis, self.cut = axis, cut
+
+    def sdf(self, p):
+        c, ra, rb = self.args
+        d = sub(p, c)
+        u, v = dot(d, self.axis), d[1] * self.axis[0] - d[0] * self.axis[1]
+        dist = (math.hypot(u / ra, v / rb) - 1) * min(ra, rb)
+        if self.cut:
+            dist = max(dist, -dot(sub(p, self.cut[0]), self.cut[1]))
+        return dist
+
+    def bounds(self):
+        (cx, cy), ra, rb = self.args
+        r = max(ra, rb)
+        return cx - r, cy - r, cx + r, cy + r
 
 
 class Projector:

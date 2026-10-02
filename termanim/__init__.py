@@ -28,6 +28,8 @@ Writing a scene (see scenes/example.py for a complete one):
         run(Fireflies)
 
 Drop the module in scenes/ and `python3 play.py fireflies` runs it.
+Characters shared between scenes (colors, materials, shaded bodies to pose)
+live in characters/; scenes import them from there, never from each other.
 Every scene gets --fps, --mono, --bpm, --bench and up/down arrows for the
 tempo; f.beats counts beats so motion can follow the music.
 """

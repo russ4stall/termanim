@@ -26,7 +26,9 @@ Keys:
     up/down   tempo +1 / -1 bpm (shown bottom right)
     Ctrl+C to stop
 
-Changes to how the rider looks go in Look, so the cached sprites stay correct.
+The rider himself is characters/cyclist.py (shared with other scenes); this
+scene poses him on the bike. New poses go in Look, so the cached sprites stay
+correct.
 
 Usage:
     python3 play.py rainy_ride               # default 24 fps, 84 bpm
@@ -41,22 +43,23 @@ import os
 import random
 from dataclasses import dataclass, replace
 
+from characters import cyclist, ufo
+from characters.cyclist import SHIN, THIGH, Joints
 from termanim import Canvas, Effect, Scene, action, rnd, run, smoothstep
-from termanim.shading import Part, Projector, add, polar, solve_joint
+from termanim.shading import Projector, add, polar, solve_joint
 from termanim.sprites import SpriteCache, cells_from_canvas, stamp
 
 # Every color in the animation (xterm-256 indices). Kept to 24 or fewer.
-PALETTE = {
+PALETTE = dict(cyclist.COLORS, **ufo.COLORS, **{
     # the city
     "cloud": 60, "bldg": 239, "win": 221, "windark": 237, "lamp": 229, "glow": 136,
     "rain": 117, "rain2": 68, "road": 238, "lane": 252, "curb": 245, "puddle": 31,
-    # the rider and his bike
-    "skin": 223, "jacket": 208, "jacket_dk": 166, "pants": 33, "pants_dk": 18,
-    "shoe": 236, "helmet": 160, "pack": 65, "frame": 43, "tire": 240, "metal": 250,
+    # his bike
+    "frame": 43, "tire": 240,
     # the storm
     "bolt": 231,
-}
-assert len(PALETTE) <= 24
+})
+assert len(set(PALETTE.values())) <= 24   # characters may share colors under their own names
 
 SCROLL_SPEED = 24       # columns per second the street slides by
 DEFAULT_BPM = 84        # pedal revolutions per minute; the street speed scales with it
@@ -80,7 +83,6 @@ HEAD_BOT = (20.8, 15.5)
 STEM = (22.4, 20.4)
 CRANK = 3.5
 HIP = (7.6, 22.4)
-THIGH, SHIN = 11.4, 10.6
 
 
 @dataclass(frozen=True)
@@ -447,20 +449,12 @@ class Gust(Effect):
 
 
 class UFO(Effect):
-    """A flying saucer swoops in, hovers about searching with its spotlight,
-    then beams up someone standing on a rooftop and zips away."""
+    """A flying saucer (characters/ufo.py) swoops in, hovers about searching
+    with its spotlight, then beams up someone standing on a rooftop and zips away."""
     layer = "sky"           # among the buildings: the rain and rider pass in front
     ARRIVE, SEARCH, SPOT, BEAM, LEAVE = 1.0, 3.5, 4.3, 6.0, 6.8   # phase end times (s)
     LIFT = (4.6, 5.8)       # the person rises up the beam between these times
     duration = LEAVE
-    SHIP = ("    ___    ",
-            " __/o o\\__ ",
-            "(_=_=_=_=_)")
-    PAINT = ("    ddd    ",      # d dome, e alien eyes, m metal hull, l running light
-             " mmde edmm ",
-             "mmlmlmlmlmm")
-    INKS = {"d": "rain", "e": "frame", "m": "metal"}
-    LIGHTS = ("lamp", "helmet", "bolt")
     SPOTS = ("side", "roof", "front", "behind")     # where the person is standing
     SHIRTS = ("helmet", "jacket", "pack", "frame", "pants", "rain", "win", "bolt", "lane")
 
@@ -473,7 +467,7 @@ class UFO(Effect):
         """Where it hovers and whom it takes, decided on the first frame (needs the layout)."""
         rng = random.Random(self.seed)
         w, horizon = f.w, f.horizon
-        hover = (rng.uniform(1, w - 12), rng.randint(1, max(1, int(horizon * 0.3))))
+        hover = (rng.uniform(1, w - ufo.WIDTH - 1), rng.randint(1, max(1, int(horizon * 0.3))))
         side = rng.choice((-1, 1))
         enter = (-14 if side < 0 else w + 3, -4)
 
@@ -528,7 +522,7 @@ class UFO(Effect):
         hover = self.plan[0]
         x = hover[0] + 5 * math.sin(u * 2.2) + 2 * math.sin(u * 5.1)
         y = hover[1] + (1 if math.sin(u * 3.0) > 0.6 else 0)
-        return min(max(x, 0), w - 11), y
+        return min(max(x, 0), w - ufo.WIDTH), y
 
     def draw(self, cv, f):
         if self.plan is None:
@@ -540,7 +534,7 @@ class UFO(Effect):
         person_x = int(round(wx - f.scroll * PARALLAX))
         x, y = self.position(age, f, person_x, feet0)
         x, y = int(round(x)), int(round(y))
-        cx, bottom = x + 5, y + 3                       # beam source under the hull
+        bottom = ufo.beam_source(x, y)[1]
 
         put = cv.put
         if spot == "behind":            # the buildings hide the person and the beam's foot
@@ -552,18 +546,9 @@ class UFO(Effect):
                     cv.put(x_, y_, ch, color)
 
         if self.ARRIVE <= age < self.SEARCH:            # the searchlight sweeps about
-            sweep = math.sin((age - self.ARRIVE) * 3.0)
-            for d in range(1, 9):
-                if rnd(d, int(f.t * 20), self.seed) < 0.7:
-                    cv.put(cx + d * sweep * 1.3, bottom + d - 1, "." if d > 2 else ":", "lamp")
+            ufo.draw_searchlight(cv, x, y, math.sin((age - self.ARRIVE) * 3.0), f.t, self.seed)
         if self.SPOT <= age < self.BEAM:                # the tractor beam
-            for row in range(bottom, feet0 + 1):
-                half = 1 + (row - bottom) * 0.35
-                put(cx - half, row, "/", "frame")
-                put(cx + half, row, "\\", "frame")
-                for xx in range(int(cx - half) + 1, int(cx + half)):
-                    if rnd(xx, row, int(f.t * 15)) < 0.3:
-                        put(xx, row, ":", "rain")
+            ufo.draw_beam(cv, x, y, feet0, f.t, put)
 
         # the person: standing, arms up once the beam hits, then lifted away
         if age < self.LIFT[1]:
@@ -578,32 +563,12 @@ class UFO(Effect):
                         if ch != " ":
                             put(person_x + dx, feet + dy, ch, color)
 
-        for r, (row, paint) in enumerate(zip(self.SHIP, self.PAINT)):
-            for c, (ch, ink) in enumerate(zip(row, paint)):
-                if ch == " ":
-                    continue
-                if ink == "l":                          # running lights chase round
-                    color = self.LIGHTS[(c // 2 + int(f.t * 8)) % len(self.LIGHTS)]
-                else:
-                    color = self.INKS[ink]
-                cv.put(x + c, y + r, ch, color)
+        ufo.draw_saucer(cv, x, y, f.t)
 
 
 # ---------------------------------------------------------------------------
 # The rider
 # ---------------------------------------------------------------------------
-
-MATERIALS = {   # light color, dark color, brightness
-    "jacket": ("jacket", "jacket_dk", 1.0),
-    "skin": ("skin", "skin", 1.3),
-    "arm": ("jacket", "jacket_dk", 0.8),
-    "pants": ("pants", "pants_dk", 1.0),
-    "pants_far": ("pants_dk", "pants_dk", 0.55),
-    "shoe": ("metal", "shoe", 0.8),
-    "helmet": ("helmet", "helmet", 1.0),
-    "pack": ("pack", "pack", 0.9),
-}
-
 
 class Rider(Projector):
     """Projects rider/bike units onto the terminal grid with the rear wheel's
@@ -611,7 +576,7 @@ class Rider(Projector):
     whole bike back about the rear hub: a wheelie."""
 
     def __init__(self, cv, bx, gy, s, tilt=0.0):
-        super().__init__(cv, bx, gy - 1, s, tilt, pivot=REAR_HUB, materials=MATERIALS)
+        super().__init__(cv, bx, gy - 1, s, tilt, pivot=REAR_HUB, materials=cyclist.MATERIALS)
 
     def wheel(self, hub, spin):
         for k in range(6):                       # spokes
@@ -647,20 +612,28 @@ def draw_rider_shape(cv, bx, gy, s, crank, spin, links, look):
     R = Rider(cv, bx, gy, s, math.radians(LIFT_ANGLES[look.lift]))
     bob = 0.3 * math.sin(2 * crank)
 
-    near_pedal = add(BB, polar(CRANK, crank))
-    far_pedal = add(BB, polar(CRANK, crank + math.pi))
-
     def leg(pedal, near):
         ankle = add(pedal, (-0.4, 1.3))
         knee = solve_joint(HIP, ankle, THIGH, SHIN)     # knees point forward
         toe = add(ankle, (3.0, -0.9 + 0.5 * math.sin(crank + (0 if near else math.pi))))
-        mat = "pants" if near else "pants_far"
-        return [Part("cap", (HIP, knee, 1.75), mat),
-                Part("cap", (knee, ankle, 1.3), mat),
-                Part("cap", (add(ankle, (-0.6, -0.2)), toe, 1.05), "shoe")]
+        return (HIP, knee, ankle, add(ankle, (-0.6, -0.2)), toe)
+
+    near_pedal = add(BB, polar(CRANK, crank))
+    far_pedal = add(BB, polar(CRANK, crank + math.pi))
+    shoulder = (17.4, 29.4 + bob)
+    j = Joints(
+        spine=(add(HIP, (0.2, 1.4)), shoulder),
+        neck=add(shoulder, (1.0, 0.5)),
+        head=(21.6, 32.2 + bob),
+        shoulder=shoulder,
+        elbow=(20.0, 24.6 + bob * 0.5),
+        hand=(23.4, 20.8),
+        legs=(leg(far_pedal, near=False), leg(near_pedal, near=True)),
+        pack=((10.0, 28.4 + bob), (13.6, 30.8 + bob)),
+    )
 
     # behind the bike: the far leg and far crank
-    R.solids(leg(far_pedal, near=False))
+    R.solids(cyclist.far_parts(j))
     R.line(BB, far_pedal, "tire")
 
     # the bike
@@ -690,27 +663,8 @@ def draw_rider_shape(cv, bx, gy, s, crank, spin, links, look):
     R.arc(REAR_HUB, 1.2, 0, 2 * math.pi, "metal")         # cog
     R.arc(BB, 2.3, 0, 2 * math.pi, "metal")               # chainring
     # in front of the bike: the near leg, body, head and arm
-    shoulder = (17.4, 29.4 + bob)
-    head = (21.6, 32.2 + bob)
-    elbow = (20.0, 24.6 + bob * 0.5)
-    hand = (23.4, 20.8)
-    R.solids([
-        Part("cap", (add(HIP, (0.2, 1.4)), shoulder, 2.8), "jacket"),
-        Part("cap", ((10.0, 28.4 + bob), (13.6, 30.8 + bob), 1.9), "pack"),
-        Part("cap", (add(shoulder, (1.0, 0.5)), add(head, (-1.2, -0.8)), 1.3), "skin"),
-        Part("ell", (head, 3.0, 3.0), "skin"),
-        Part("ell", (add(head, (2.9, -0.5)), 1.0, 0.9), "skin"),                  # nose
-        Part("ell", (add(head, (-0.6, 0.7)), 3.8, 3.2), "helmet", head[1] - 0.1),  # helmet
-        Part("cap", (add(head, (2.6, 1.2)), add(head, (4.2, 0.8)), 0.55), "helmet"),  # visor
-    ] + leg(near_pedal, near=True) + [
-        Part("cap", (shoulder, elbow, 1.6), "arm"),
-        Part("cap", (elbow, hand, 1.3), "arm"),
-        Part("ell", (add(hand, (0.3, 0.0)), 1.3, 1.2), "shoe"),                    # glove
-    ])
-    ex, ey = R.to_screen(add(head, (1.4, 0.0)))
-    cv.put(ex, ey, "o", "shoe")                                                     # eye
-    mx, my = R.to_screen(add(head, (2.0, -1.6)))
-    cv.put(mx, my, "-", "jacket_dk")                                                # mouth
+    R.solids(cyclist.near_parts(j))
+    cyclist.draw_face(cv, R, j)
     # reflective stripe on the backpack
     R.line((10.2, 29.6 + bob), (13.4, 31.6 + bob), "lamp", "=")
 
